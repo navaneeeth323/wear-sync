@@ -1,0 +1,20 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+build/
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+.kotlin/
+
+# Signing keys (never commit)
+*.jks
+*.keystore
+keystore.properties
+
+# Local developer notes
+DEVELOPMENT.md
