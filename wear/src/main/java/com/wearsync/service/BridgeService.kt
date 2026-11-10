@@ -90,6 +90,7 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
                 if (uid != -1 && actionId != -1 && ::handler.isInitialized) {
                     handler.post { ancs.performAction(uid, actionId) }
                     notifier.cancel(uid)
+                    IncomingCalls.ended(uid)
                 }
             }
             ACTION_MEDIA -> {
@@ -113,6 +114,7 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
             thread.quitSafely() // runs the teardown above first
         }
         BridgeState.reset()
+        IncomingCalls.clear()
         super.onDestroy()
     }
 
@@ -149,6 +151,7 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
             IPhoneLink.State.DISCONNECTED -> {
                 ancs.reset()
                 BridgeState.updateMedia { MediaState() }
+                IncomingCalls.clear()
                 host.startAdvertising() // lets a new, unbonded iPhone find us
                 handler.postDelayed(::connectToIPhone, RECONNECT_DELAY_MS)
             }
@@ -227,11 +230,15 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
 
     override fun onNotification(notification: AncsNotification) {
         Log.d(TAG, "iPhone notification ${notification.uid} from ${notification.appLabel}")
+        if (notification.isCall) IncomingCalls.started(notification.uid)
         notifier.post(notification)
         BridgeState.update { it.copy(lastNotification = "${notification.appLabel}: ${notification.title.orEmpty()}") }
     }
 
-    override fun onNotificationRemoved(uid: Int) = notifier.cancel(uid)
+    override fun onNotificationRemoved(uid: Int) {
+        notifier.cancel(uid)
+        IncomingCalls.ended(uid) // answered, declined or hung up
+    }
 
     private fun refreshStatusNotification() {
         val s = BridgeState.status.value

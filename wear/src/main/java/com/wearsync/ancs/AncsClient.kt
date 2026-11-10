@@ -74,7 +74,7 @@ class AncsClient(
             is Request.AppAttrs -> {
                 val (_, attrs) = AncsCodec.parseAppAttributesResponse(bytes, 1) ?: return
                 finishInFlight()
-                val name = attrs[AppAttributeId.DISPLAY_NAME].orEmpty().ifBlank { request.appId }
+                val name = attrs[AppAttributeId.DISPLAY_NAME].orEmpty().stripBidiMarks().ifBlank { request.appId }
                 appNames[request.appId] = name
                 releaseWaiting(request.appId, name)
             }
@@ -88,6 +88,7 @@ class AncsClient(
     }
 
     fun performAction(uid: Int, actionId: Int) {
+        Log.i(TAG, "Perform action ${if (actionId == ActionId.POSITIVE) "positive" else "negative"} on uid=$uid")
         sendCommand(AncsCodec.performAction(uid, actionId))
     }
 
@@ -102,6 +103,13 @@ class AncsClient(
 
     private fun onAttributes(event: NotificationSourceEvent, attrs: Map<Int, String>) {
         val appId = attrs[NotificationAttributeId.APP_IDENTIFIER].orEmpty()
+        Log.d(
+            TAG,
+            "uid=${event.uid} event=${event.eventId} category=${event.categoryId} " +
+                "flags=0x${event.flags.toString(16)} app=$appId " +
+                "+action='${attrs[NotificationAttributeId.POSITIVE_ACTION_LABEL]}' " +
+                "-action='${attrs[NotificationAttributeId.NEGATIVE_ACTION_LABEL]}'",
+        )
         val notification = AncsNotification(
             uid = event.uid,
             eventId = event.eventId,
@@ -169,6 +177,9 @@ class AncsClient(
         if (request is Request.AppAttrs) releaseWaiting(request.appId, null)
         pump()
     }
+
+    /** Some apps (e.g. WhatsApp) prefix their name with invisible left-to-right marks. */
+    private fun String.stripBidiMarks() = filterNot { it in "\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069" }.trim()
 
     private companion object {
         const val TAG = "WearSync/ANCS"

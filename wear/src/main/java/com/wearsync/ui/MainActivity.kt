@@ -1,6 +1,12 @@
 package com.wearsync.ui
 
+import android.app.NotificationManager
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,10 +16,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
@@ -42,6 +52,12 @@ private fun BridgeScreen() {
     val context = LocalContext.current
     val status by BridgeState.status.collectAsStateWithLifecycle()
     val media by BridgeState.media.collectAsStateWithLifecycle()
+    // Re-checked on resume, so the button disappears after granting it in Settings.
+    var canShowCallScreen by remember { mutableStateOf(canUseFullScreenIntent(context)) }
+    LifecycleResumeEffect(Unit) {
+        canShowCallScreen = canUseFullScreenIntent(context)
+        onPauseOrDispose { }
+    }
     val listState = rememberScalingLazyListState()
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -83,6 +99,16 @@ private fun BridgeScreen() {
                     )
                 }
             }
+            if (status.running && !canShowCallScreen) {
+                item {
+                    Chip(
+                        label = { Text("Allow call screen") },
+                        secondaryLabel = { Text("Show iPhone calls full-screen") },
+                        onClick = { openFullScreenIntentSettings(context) },
+                        colors = ChipDefaults.secondaryChipColors(),
+                    )
+                }
+            }
             status.lastNotification?.let { last ->
                 item {
                     Text(
@@ -94,6 +120,20 @@ private fun BridgeScreen() {
                 }
             }
         }
+    }
+}
+
+private fun canUseFullScreenIntent(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+        context.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+
+private fun openFullScreenIntentSettings(context: Context) {
+    val pkg = Uri.parse("package:${context.packageName}")
+    try {
+        context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pkg))
+    } catch (_: ActivityNotFoundException) {
+        // Some watches don't have that screen; fall back to the app's settings page.
+        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg))
     }
 }
 

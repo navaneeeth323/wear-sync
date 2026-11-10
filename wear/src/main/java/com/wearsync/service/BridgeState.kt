@@ -40,6 +40,17 @@ object BridgeState {
     }
 }
 
+/** iPhone calls currently ringing (ANCS uids), so the call screen can close when one ends. */
+object IncomingCalls {
+    private val _active = MutableStateFlow<Set<Int>>(emptySet())
+    val active: StateFlow<Set<Int>> = _active.asStateFlow()
+
+    fun isActive(uid: Int) = uid in _active.value
+    fun started(uid: Int) = _active.update { it + uid }
+    fun ended(uid: Int) = _active.update { it - uid }
+    fun clear() { _active.value = emptySet() }
+}
+
 object Prefs {
     private fun prefs(c: Context) = c.getSharedPreferences("wearsync", Context.MODE_PRIVATE)
 
