@@ -109,6 +109,14 @@ private fun BridgeScreen() {
                     )
                 }
             }
+            item {
+                Chip(
+                    label = { Text("Notification apps") },
+                    secondaryLabel = { Text("Choose which apps alert") },
+                    onClick = { context.startActivity(Intent(context, AppsActivity::class.java)) },
+                    colors = ChipDefaults.secondaryChipColors(),
+                )
+            }
             status.lastNotification?.let { last ->
                 item {
                     Text(

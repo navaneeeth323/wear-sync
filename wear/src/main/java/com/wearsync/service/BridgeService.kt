@@ -20,6 +20,8 @@ import com.wearsync.ams.AmsCodec
 import com.wearsync.ams.MediaState
 import com.wearsync.ams.WatchMediaSession
 import com.wearsync.ancs.AncsClient
+import com.wearsync.apps.AppMode
+import com.wearsync.apps.AppRegistry
 import com.wearsync.ancs.AncsNotification
 import com.wearsync.ble.IPhoneLink
 import com.wearsync.ble.PeripheralHost
@@ -230,8 +232,21 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
 
     override fun onNotification(notification: AncsNotification) {
         Log.d(TAG, "iPhone notification ${notification.uid} from ${notification.appLabel}")
-        if (notification.isCall) IncomingCalls.started(notification.uid)
-        notifier.post(notification)
+        AppRegistry.seen(this, notification.appId, notification.appLabel)
+        if (notification.isCall) {
+            // Calls always ring, whatever the app's setting.
+            IncomingCalls.started(notification.uid)
+            notifier.post(notification)
+        } else {
+            when (AppRegistry.mode(this, notification.appId)) {
+                AppMode.OFF -> {
+                    Log.d(TAG, "Hidden: ${notification.appLabel} is turned off")
+                    return
+                }
+                AppMode.SILENT -> notifier.post(notification, silent = true)
+                AppMode.ON -> notifier.post(notification)
+            }
+        }
         BridgeState.update { it.copy(lastNotification = "${notification.appLabel}: ${notification.title.orEmpty()}") }
     }
 

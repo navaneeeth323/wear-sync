@@ -16,6 +16,7 @@ import androidx.core.app.Person
 import androidx.core.content.ContextCompat
 import com.wearsync.R
 import com.wearsync.ancs.ActionId
+import com.wearsync.apps.AppIcons
 import com.wearsync.ancs.AncsNotification
 import com.wearsync.ancs.Category
 import com.wearsync.service.BridgeService
@@ -52,7 +53,8 @@ class WatchNotifier(private val context: Context) {
         if (canPost()) manager.notify(STATUS_ID, statusNotification(text))
     }
 
-    fun post(n: AncsNotification) {
+    /** @param silent the user set this app to Silent in the per-app settings. */
+    fun post(n: AncsNotification, silent: Boolean = false) {
         if (!canPost()) return
         if (n.isCall) {
             postCall(n)
@@ -68,7 +70,8 @@ class WatchNotifier(private val context: Context) {
             .setShowWhen(true)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true) // a MODIFIED event re-posts the same uid without buzzing again
-            .setSilent(n.isSilent)
+            .setSilent(n.isSilent || silent)
+            .setLargeIcon(AppIcons.iconFor(context, n.appId, n.appLabel))
             .setCategory(categoryFor(n.categoryId))
             .setPriority(if (n.isImportant || n.isCall) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
 
