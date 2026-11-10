@@ -15,11 +15,16 @@ import android.os.ParcelUuid
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.wear.tiles.TileService
+import com.wearsync.ams.AmsCodec
+import com.wearsync.ams.MediaState
+import com.wearsync.ams.WatchMediaSession
 import com.wearsync.ancs.AncsClient
 import com.wearsync.ancs.AncsNotification
 import com.wearsync.ble.IPhoneLink
 import com.wearsync.ble.PeripheralHost
 import com.wearsync.notify.WatchNotifier
+import com.wearsync.tile.MediaTileService
 
 /**
  * Foreground service that owns the iPhone connection. All Bluetooth work runs on one
@@ -36,6 +41,7 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
     private lateinit var host: PeripheralHost
     private lateinit var link: IPhoneLink
     private lateinit var ancs: AncsClient
+    private lateinit var mediaSession: WatchMediaSession
 
     /** Centrals that turned out not to be iPhones (e.g. an Android phone), this session. */
     private val ignored = mutableSetOf<String>()
@@ -64,7 +70,9 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
             host = PeripheralHost(this, handler, this)
             link = IPhoneLink(this, handler, this)
             ancs = AncsClient(handler, link::writeControlPoint, this)
+            mediaSession = WatchMediaSession(this, handler) { cmd -> link.sendRemoteCommand(cmd) }
             BridgeState.update { it.copy(running = true, watchName = host.localName, error = null) }
+            mediaCommandSink = { cmd -> handler.post { link.sendRemoteCommand(cmd) } }
             host.start()
             connectToIPhone()
         }
@@ -84,17 +92,23 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
                     notifier.cancel(uid)
                 }
             }
+            ACTION_MEDIA -> {
+                val command = intent.getIntExtra(EXTRA_MEDIA_COMMAND, -1)
+                if (command != -1) sendMediaCommand(command)
+            }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
         stopping = true
+        mediaCommandSink = null
         if (::thread.isInitialized) {
             handler.post {
                 host.stop()
                 link.close()
                 ancs.reset()
+                mediaSession.release()
             }
             thread.quitSafely() // runs the teardown above first
         }
@@ -134,17 +148,45 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
             }
             IPhoneLink.State.DISCONNECTED -> {
                 ancs.reset()
+                BridgeState.updateMedia { MediaState() }
                 host.startAdvertising() // lets a new, unbonded iPhone find us
                 handler.postDelayed(::connectToIPhone, RECONNECT_DELAY_MS)
             }
             else -> Unit
         }
+        mediaChanged()
         refreshStatusNotification()
     }
 
     override fun onNotificationSource(value: ByteArray) = ancs.onNotificationSource(value)
     override fun onDataSource(value: ByteArray) = ancs.onDataSource(value)
     override fun onControlPointWriteFailed(status: Int) = ancs.onCommandFailed()
+
+    override fun onAmsRemoteCommand(value: ByteArray) {
+        val supported = AmsCodec.parseSupportedCommands(value)
+        BridgeState.updateMedia { it.copy(supportedCommands = supported) }
+        mediaChanged()
+    }
+
+    override fun onAmsEntityUpdate(value: ByteArray) {
+        val update = AmsCodec.parseEntityUpdate(value) ?: return
+        if (update.truncated) Log.d(TAG, "AMS value truncated: entity=${update.entityId} attr=${update.attributeId}")
+        BridgeState.updateMedia { it.apply(update, System.currentTimeMillis()) }
+        mediaChanged()
+    }
+
+    private fun mediaChanged() {
+        mediaSession.update(BridgeState.media.value, link.state == IPhoneLink.State.READY)
+        refreshMediaTile()
+    }
+
+    private fun refreshMediaTile() {
+        try {
+            TileService.getUpdater(this).requestUpdate(MediaTileService::class.java)
+        } catch (e: Exception) {
+            Log.w(TAG, "Tile update failed", e)
+        }
+    }
 
     override fun onNotAnIPhone(device: BluetoothDevice) {
         ignored += device.address
@@ -209,8 +251,21 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
         const val ACTION_PERFORM = "com.wearsync.PERFORM_ACTION"
         const val EXTRA_UID = "uid"
         const val EXTRA_ACTION_ID = "action_id"
+        const val ACTION_MEDIA = "com.wearsync.MEDIA_COMMAND"
+        const val EXTRA_MEDIA_COMMAND = "media_command"
         private const val RECONNECT_DELAY_MS = 2_000L
         private val APPLE_DEVICE_UUID = ParcelUuid.fromString("00000000-deca-fade-deca-deafdecacafe")
+
+        /** Set while the service runs; sends an AMS remote command to the iPhone. */
+        @Volatile private var mediaCommandSink: ((Int) -> Unit)? = null
+
+        /** Returns false if the bridge isn't running. Safe to call from any thread. */
+        fun sendMediaCommand(commandId: Int): Boolean {
+            Log.i(TAG, "Media command $commandId from app/tile/notification")
+            val sink = mediaCommandSink ?: return false
+            sink(commandId)
+            return true
+        }
 
         fun start(context: Context) {
             Prefs.setEnabled(context, true)

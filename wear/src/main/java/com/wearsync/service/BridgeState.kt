@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import com.wearsync.ams.MediaState
 import com.wearsync.ble.IPhoneLink
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,8 +27,17 @@ object BridgeState {
     private val _status = MutableStateFlow(BridgeStatus())
     val status: StateFlow<BridgeStatus> = _status.asStateFlow()
 
+    /** What's playing on the iPhone (AMS). */
+    private val _media = MutableStateFlow(MediaState())
+    val media: StateFlow<MediaState> = _media.asStateFlow()
+
     fun update(transform: (BridgeStatus) -> BridgeStatus) = _status.update(transform)
-    fun reset() { _status.value = BridgeStatus() }
+    fun updateMedia(transform: (MediaState) -> MediaState) = _media.update(transform)
+
+    fun reset() {
+        _status.value = BridgeStatus()
+        _media.value = MediaState()
+    }
 }
 
 object Prefs {

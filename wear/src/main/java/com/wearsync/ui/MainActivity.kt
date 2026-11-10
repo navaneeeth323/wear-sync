@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
 private fun BridgeScreen() {
     val context = LocalContext.current
     val status by BridgeState.status.collectAsStateWithLifecycle()
+    val media by BridgeState.media.collectAsStateWithLifecycle()
     val listState = rememberScalingLazyListState()
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -64,6 +65,9 @@ private fun BridgeScreen() {
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
+            }
+            if (status.running && status.link == IPhoneLink.State.READY) {
+                item { NowPlaying(media) }
             }
             item {
                 if (status.running) {

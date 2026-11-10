@@ -15,6 +15,8 @@ import android.content.IntentFilter
 import android.os.Handler
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.wearsync.ams.Ams
+import com.wearsync.ams.AmsCodec
 import com.wearsync.ancs.Ancs
 
 /**
@@ -39,6 +41,10 @@ class IPhoneLink(
         fun onControlPointWriteFailed(status: Int)
         /** The connected central has no ANCS (e.g. an Android phone). */
         fun onNotAnIPhone(device: BluetoothDevice)
+        /** AMS: the list of remote commands the current media app supports. */
+        fun onAmsRemoteCommand(value: ByteArray)
+        /** AMS: a track/player attribute changed. */
+        fun onAmsEntityUpdate(value: ByteArray)
     }
 
     var state = State.DISCONNECTED
@@ -49,6 +55,7 @@ class IPhoneLink(
     private var gatt: BluetoothGatt? = null
     private val ops = GattOpQueue(handler)
     private var controlPoint: BluetoothGattCharacteristic? = null
+    private var remoteCommand: BluetoothGattCharacteristic? = null
     private var discoveryRetries = 0
 
     private val bondReceiver = object : BroadcastReceiver() {
@@ -119,9 +126,22 @@ class IPhoneLink(
         }
     }
 
+    /** AMS: play/pause/next/volume etc. Silently dropped if AMS isn't available. */
+    fun sendRemoteCommand(commandId: Int) {
+        val g = gatt
+        val rc = remoteCommand
+        if (g == null || rc == null || state != State.READY) {
+            Log.w(TAG, "Media command $commandId dropped: AMS not ready")
+            return
+        }
+        Log.i(TAG, "Sending AMS command $commandId")
+        write(g, rc, AmsCodec.command(commandId), "media command $commandId")
+    }
+
     private fun closeGatt() {
         ops.clear()
         controlPoint = null
+        remoteCommand = null
         gatt?.let {
             it.disconnect()
             it.close()
@@ -169,6 +189,31 @@ class IPhoneLink(
         // Apple recommends subscribing to Data Source before Notification Source.
         enableNotifications(g, ds)
         enableNotifications(g, ns)
+        subscribeToMedia(g)
+    }
+
+    /** AMS is optional: without it, notifications still work. */
+    private fun subscribeToMedia(g: BluetoothGatt) {
+        val ams = g.getService(Ams.SERVICE)
+        val rc = ams?.getCharacteristic(Ams.REMOTE_COMMAND)
+        val eu = ams?.getCharacteristic(Ams.ENTITY_UPDATE)
+        if (rc == null || eu == null) {
+            Log.i(TAG, "No AMS on this iPhone; media controls unavailable")
+            return
+        }
+        remoteCommand = rc
+        enableNotifications(g, rc)
+        enableNotifications(g, eu)
+        // Entity Update subscriptions must come after notifications are on, one entity per write.
+        write(g, eu, AmsCodec.TRACK_SUBSCRIPTION, "AMS track subscription")
+        write(g, eu, AmsCodec.PLAYER_SUBSCRIPTION, "AMS player subscription")
+    }
+
+    private fun write(g: BluetoothGatt, c: BluetoothGattCharacteristic, bytes: ByteArray, name: String) {
+        ops.enqueue(name) {
+            g.writeCharacteristic(c, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+                BluetoothStatusCodes.SUCCESS
+        }
     }
 
     private fun enableNotifications(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
@@ -246,18 +291,19 @@ class IPhoneLink(
 
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
             ops.completed()
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                // ANCS errors: 0xA0 unknown command, 0xA1 invalid command, 0xA2 invalid parameter,
-                // 0xA3 action failed.
-                Log.w(TAG, "Control Point write failed: 0x${status.toString(16)}")
-                listener.onControlPointWriteFailed(status)
-            }
+            if (status == BluetoothGatt.GATT_SUCCESS) return
+            Log.w(TAG, "Write to ${c.uuid} failed: 0x${status.toString(16)}")
+            // ANCS errors: 0xA0 unknown command, 0xA1 invalid command, 0xA2 invalid parameter,
+            // 0xA3 action failed. (AMS uses 0xA0-0xA2 too, e.g. 0xA0 = no media app active.)
+            if (c.uuid == Ancs.CONTROL_POINT) listener.onControlPointWriteFailed(status)
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) {
             when (c.uuid) {
                 Ancs.NOTIFICATION_SOURCE -> listener.onNotificationSource(value)
                 Ancs.DATA_SOURCE -> listener.onDataSource(value)
+                Ams.REMOTE_COMMAND -> listener.onAmsRemoteCommand(value)
+                Ams.ENTITY_UPDATE -> listener.onAmsEntityUpdate(value)
             }
         }
     }
