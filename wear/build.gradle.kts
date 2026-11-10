@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.wear.protolayout.material)
     implementation(libs.guava)
     implementation(libs.androidx.media)
+    implementation(libs.androidx.wear.ongoing)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)

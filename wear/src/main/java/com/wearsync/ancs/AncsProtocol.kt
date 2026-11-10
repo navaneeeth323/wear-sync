@@ -46,6 +46,12 @@ object Category {
     const val BUSINESS_AND_FINANCE = 9
     const val LOCATION = 10
     const val ENTERTAINMENT = 11
+
+    /**
+     * Not in Apple's spec. Observed on iOS (2026-11) while a call is connected: posted after
+     * the call is answered, with a negative action labelled "End Call", removed when it ends.
+     */
+    const val ACTIVE_CALL = 12
 }
 
 object CommandId {

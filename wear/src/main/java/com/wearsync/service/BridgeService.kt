@@ -117,6 +117,7 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
         }
         BridgeState.reset()
         IncomingCalls.clear()
+        ActiveCall.clear()
         super.onDestroy()
     }
 
@@ -154,6 +155,7 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
                 ancs.reset()
                 BridgeState.updateMedia { MediaState() }
                 IncomingCalls.clear()
+                ActiveCall.clear()
                 host.startAdvertising() // lets a new, unbonded iPhone find us
                 handler.postDelayed(::connectToIPhone, RECONNECT_DELAY_MS)
             }
@@ -233,7 +235,17 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
     override fun onNotification(notification: AncsNotification) {
         Log.d(TAG, "iPhone notification ${notification.uid} from ${notification.appLabel}")
         AppRegistry.seen(this, notification.appId, notification.appLabel)
-        if (notification.isCall) {
+        if (notification.isActiveCall) {
+            val call = ActiveCallInfo(
+                uid = notification.uid,
+                caller = notification.title?.takeIf { it.isNotBlank() } ?: "Call",
+                source = notification.appLabel,
+                endLabel = notification.negativeActionLabel,
+                startedAtMillis = notification.dateMillis ?: System.currentTimeMillis(),
+            )
+            ActiveCall.started(call)
+            notifier.postActiveCall(call)
+        } else if (notification.isCall) {
             // Calls always ring, whatever the app's setting.
             IncomingCalls.started(notification.uid)
             notifier.post(notification)
@@ -253,6 +265,7 @@ class BridgeService : Service(), PeripheralHost.Listener, IPhoneLink.Listener, A
     override fun onNotificationRemoved(uid: Int) {
         notifier.cancel(uid)
         IncomingCalls.ended(uid) // answered, declined or hung up
+        ActiveCall.ended(uid)
     }
 
     private fun refreshStatusNotification() {

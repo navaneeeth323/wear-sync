@@ -22,6 +22,7 @@ data class AncsNotification(
         get() = listOfNotNull(subtitle, message).filter { it.isNotBlank() }.joinToString("\n")
 
     val isCall get() = categoryId == Category.INCOMING_CALL
+    val isActiveCall get() = categoryId == Category.ACTIVE_CALL
     val isSilent get() = flags and EventFlag.SILENT != 0
     val isImportant get() = flags and EventFlag.IMPORTANT != 0
 }

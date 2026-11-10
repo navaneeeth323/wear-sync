@@ -51,6 +51,25 @@ object IncomingCalls {
     fun clear() { _active.value = emptySet() }
 }
 
+/** A connected iPhone call (ANCS category 12). */
+data class ActiveCallInfo(
+    val uid: Int,
+    val caller: String,
+    val source: String,
+    val endLabel: String?,
+    val startedAtMillis: Long,
+)
+
+/** The call currently in progress on the iPhone, if any. */
+object ActiveCall {
+    private val _state = MutableStateFlow<ActiveCallInfo?>(null)
+    val state: StateFlow<ActiveCallInfo?> = _state.asStateFlow()
+
+    fun started(info: ActiveCallInfo) { _state.value = info }
+    fun ended(uid: Int) = _state.update { if (it?.uid == uid) null else it }
+    fun clear() { _state.value = null }
+}
+
 object Prefs {
     private fun prefs(c: Context) = c.getSharedPreferences("wearsync", Context.MODE_PRIVATE)
 

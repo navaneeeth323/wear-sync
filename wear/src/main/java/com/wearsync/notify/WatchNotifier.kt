@@ -8,17 +8,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.content.ContextCompat
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
 import com.wearsync.R
 import com.wearsync.ancs.ActionId
 import com.wearsync.apps.AppIcons
 import com.wearsync.ancs.AncsNotification
 import com.wearsync.ancs.Category
+import com.wearsync.service.ActiveCallInfo
 import com.wearsync.service.BridgeService
 import com.wearsync.ui.CallActivity
 import com.wearsync.ui.MainActivity
@@ -81,7 +85,57 @@ class WatchNotifier(private val context: Context) {
         manager.notify(TAG_IPHONE, n.uid, builder.build())
     }
 
-    fun cancel(uid: Int) = manager.cancel(TAG_IPHONE, uid)
+    fun cancel(uid: Int) {
+        manager.cancel(TAG_IPHONE, uid)
+        if (uid == activeCallUid) {
+            manager.cancel(ACTIVE_CALL_ID)
+            activeCallUid = null
+        }
+    }
+
+    private var activeCallUid: Int? = null
+
+    /**
+     * Call in progress (ANCS category 12): a quiet ongoing notification with a call timer and
+     * End Call, plus a Wear OS ongoing-activity icon on the watch face that reopens the call
+     * screen. No full-screen intent: a call that's already connected shouldn't wake the watch.
+     */
+    fun postActiveCall(call: ActiveCallInfo) {
+        if (!canPost()) return
+        val open = PendingIntent.getActivity(
+            context, 1, CallActivity.activeIntent(context),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val builder = NotificationCompat.Builder(context, CH_STATUS)
+            .setSmallIcon(R.drawable.ic_call)
+            .setContentTitle(call.caller)
+            .setContentText(listOf("On call", call.source).filter { it.isNotBlank() }.joinToString(" · "))
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setOngoing(true)
+            .setSilent(true)
+            .setWhen(call.startedAtMillis)
+            .setUsesChronometer(true)
+            .setContentIntent(open)
+        call.endLabel?.let { builder.addAction(R.drawable.ic_call_end, it, actionIntent(call.uid, ActionId.NEGATIVE)) }
+
+        val startedElapsed = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - call.startedAtMillis)
+        OngoingActivity.Builder(context, ACTIVE_CALL_ID, builder)
+            .setStaticIcon(R.drawable.ic_call)
+            .setTouchIntent(open)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setStatus(
+                Status.Builder()
+                    .addTemplate("#caller# · #time#")
+                    .addPart("caller", Status.TextPart(call.caller))
+                    .addPart("time", Status.StopwatchPart(startedElapsed))
+                    .build(),
+            )
+            .build()
+            .apply(context)
+
+        activeCallUid = call.uid
+        manager.notify(ACTIVE_CALL_ID, builder.build())
+    }
 
     /**
      * Incoming call: a CallStyle notification whose full-screen intent opens [CallActivity]
@@ -167,6 +221,7 @@ class WatchNotifier(private val context: Context) {
 
     companion object {
         const val STATUS_ID = 1
+        private const val ACTIVE_CALL_ID = 3 // 2 is the media notification
         private const val TAG_IPHONE = "iphone"
         private const val CH_STATUS = "status"
         private const val CH_IPHONE = "iphone"
